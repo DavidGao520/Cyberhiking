@@ -48,6 +48,154 @@ export class GameState {
     }
   }
 
+  getEquipmentFlags() {
+    return {
+      hasGPS: this.equipment.some(eq => eq.effect?.navigationBonus),
+      hasSatPhone: this.equipment.some(eq => eq.effect?.emergencyHelp),
+      hasSolarCharger: this.equipment.some(eq => eq.effect?.devicePower),
+      hasPoles: this.equipment.some(eq => eq.id === 'trekking-poles'),
+      hasKneePads: this.equipment.some(eq => eq.effect?.downhillProtection),
+      hasRaincoat: this.equipment.some(eq => eq.effect?.rainProtection),
+      hasGoggles: this.equipment.some(eq => eq.effect?.windProtection),
+      navigationBonus: this.equipment.reduce((sum, eq) => sum + (eq.effect?.navigationBonus || 0), 0),
+    };
+  }
+
+  getEventEquipmentBonus(eventId) {
+    const gear = this.getEquipmentFlags();
+    let successBoost = 0;
+    let damageReduction = 0;
+    const helpers = [];
+
+    switch (eventId) {
+      case 'lost':
+        if (gear.hasGPS) {
+          successBoost += gear.navigationBonus;
+          helpers.push('📡 GPS');
+        }
+        if (gear.hasGoggles) {
+          successBoost += 0.05;
+          helpers.push('🥽 Goggles');
+        }
+        if (gear.hasSolarCharger && gear.hasGPS) {
+          successBoost += 0.05;
+          helpers.push('🔋 Solar GPS');
+        }
+        break;
+
+      case 'steep-descent':
+        if (gear.hasPoles) {
+          successBoost += 0.1;
+          damageReduction += 0.25;
+          helpers.push('🥾 Trekking poles');
+        }
+        if (gear.hasKneePads) {
+          successBoost += 0.05;
+          damageReduction += 0.2;
+          helpers.push('🦵 Knee pads');
+        }
+        break;
+
+      case 'river-crossing':
+        if (gear.hasPoles) {
+          successBoost += 0.1;
+          damageReduction += 0.2;
+          helpers.push('🥾 Trekking poles');
+        }
+        break;
+
+      case 'storm':
+        if (gear.hasRaincoat) {
+          successBoost += 0.15;
+          damageReduction += 0.4;
+          helpers.push('🧥 Raincoat');
+        }
+        break;
+
+      case 'snow':
+        if (gear.hasGoggles) {
+          successBoost += 0.1;
+          damageReduction += 0.15;
+          helpers.push('🥽 Goggles');
+        }
+        if (gear.hasRaincoat) {
+          damageReduction += 0.1;
+          helpers.push('🧥 Raincoat');
+        }
+        break;
+
+      case 'injury':
+        if (gear.hasKneePads) {
+          successBoost += 0.1;
+          damageReduction += 0.2;
+          helpers.push('🦵 Knee pads');
+        }
+        if (gear.hasPoles) {
+          successBoost += 0.05;
+          helpers.push('🥾 Trekking poles');
+        }
+        break;
+
+      case 'altitude-sickness':
+        if (gear.hasGPS) {
+          successBoost += 0.05;
+          helpers.push('📡 GPS altitude');
+        }
+        break;
+
+      case 'night-hiking':
+        if (gear.hasSolarCharger) {
+          successBoost += 0.1;
+          helpers.push('🔋 Solar headlamp');
+        }
+        break;
+
+      case 'equipment':
+        if (gear.hasSolarCharger) {
+          successBoost += 0.1;
+          helpers.push('🔋 Solar charger');
+        }
+        break;
+
+      case 'wildlife':
+      case 'bear':
+        if (gear.hasSatPhone) {
+          successBoost += 0.05;
+          helpers.push('📱 Sat phone ready');
+        }
+        break;
+    }
+
+    damageReduction = Math.min(0.6, damageReduction);
+    return { successBoost, damageReduction, helpers };
+  }
+
+  attemptEmergencyRescue(cause) {
+    const satPhoneIndex = this.equipment.findIndex(eq => eq.effect?.emergencyHelp);
+    if (satPhoneIndex === -1) return false;
+
+    const hasSolarCharger = this.equipment.some(eq => eq.effect?.devicePower);
+    const healthRestore = hasSolarCharger ? 40 : 30;
+    const energyRestore = hasSolarCharger ? 35 : 25;
+
+    this.equipment.splice(satPhoneIndex, 1);
+    this.currentWeight = Math.max(0, this.currentWeight - 0.5);
+
+    this.health = healthRestore;
+    this.energy = energyRestore;
+    this.water = Math.max(this.water, 2);
+    this.isDead = false;
+
+    this.addLog(`EMERGENCY RESCUE! Satellite phone used. Cause: ${cause}.`);
+    this.resultMessage = {
+      title: '📱 Emergency Rescue!',
+      text: `Your satellite phone saved your life!\nCause: ${cause}\n\nA rescue team arrived just in time.\n\n❤️ Health: ${Math.round(this.health)}\n⚡ Energy: ${Math.round(this.energy)}\n💧 Water: ${this.water.toFixed(1)}L\n\n⚠️ Satellite phone consumed.`,
+      isSuccess: true
+    };
+
+    return true;
+  }
+
   // Move forward to next location
   moveForward() {
     if (this.isDead || this.isComplete) return false;
@@ -77,28 +225,33 @@ export class GameState {
     }, 0);
     energyCost *= (1 - energyReduction);
     
-    // Weather modifier (mild impact)
-    const weatherModifier = 1 + (Math.abs(this.weather?.energyModifier || 0) / 200);
+    // Weather modifier (mild impact, reduced by rain/wind gear)
+    const gear = this.getEquipmentFlags();
+    let weatherPenalty = Math.abs(this.weather?.energyModifier || 0);
+    const weatherName = this.weather?.name || '';
+    if (gear.hasRaincoat && ['Rain', 'Heavy Rain', 'Thunderstorm'].includes(weatherName)) {
+      weatherPenalty *= 0.5;
+    }
+    if (gear.hasGoggles && ['Blizzard', 'Fog', 'Snow'].includes(weatherName)) {
+      weatherPenalty *= 0.6;
+    }
+    const weatherModifier = 1 + (weatherPenalty / 200);
     energyCost *= weatherModifier;
     
     // Cap energy cost at reasonable level (15-35% per segment)
     energyCost = Math.min(35, Math.max(10, energyCost));
 
-    // Check if player has enough energy
+    // Forced march: if energy is insufficient, push through at the cost of health
     if (this.energy < energyCost) {
-      this.resultMessage = {
-        title: 'Too Exhausted',
-        text: `You're too tired to continue.\nCurrent energy: ${Math.round(this.energy)}%\nRequired: ${Math.round(energyCost)}%\n\nRest to recover your energy.`,
-        isSuccess: false
-      };
-      this.addLog("You're too exhausted to continue. Rest first.");
-      return false;
+      const deficit = energyCost - this.energy;
+      this.health -= deficit * 0.8;
+      this.mental = Math.max(0, this.mental - 15);
+      this.addLog("Forced march! Pushing through extreme exhaustion.");
     }
 
-    // Calculate time and resource costs
-    const hoursToTravel = distance / 2.5; // Average hiking speed: 2.5 mph
-    const foodCost = distance * 0.15; // ~0.15 food units per mile (reasonable consumption)
-    const waterCost = distance / 15; // ~15 miles per liter
+    const hoursToTravel = distance / 2.5;
+    const foodCost = distance * 0.15;
+    const waterCost = distance / 15;
 
     this.energy = Math.max(0, this.energy - energyCost);
     this.food = Math.max(0, this.food - foodCost);
@@ -107,23 +260,29 @@ export class GameState {
     this.distance = nextPoint.distance;
     this.currentLocation++;
 
-    // Update daily calorie need (increases with distance - "Hiker Hunger")
-    this.dailyCalorieNeed = 4000 + (this.distance / 100) * 100; // +100 cal per 100 miles
+    this.dailyCalorieNeed = 4000 + (this.distance / 100) * 100;
 
     this.updateWeather();
+
+    if (gear.hasSolarCharger) {
+      this.mental = Math.min(100, this.mental + 1);
+    }
+
     this.addLog(`Reached ${nextPoint.name} (${nextPoint.elevation}ft). Distance: ${this.distance.toFixed(1)} miles.`);
 
-    // Always trigger a random event first
+    // If forced march was fatal, resolve before triggering an event
+    if (this.health <= 0) {
+      if (!this.attemptEmergencyRescue('Collapsed during forced march')) {
+        this.isDead = true;
+        this.addLog("Your body gave out during a desperate push forward.");
+      }
+      return true;
+    }
+
     this.triggerEvent();
-    
-    // Mark if this location has resupply available (for the Resupply button)
+
     this.canResupply = (nextPoint.type === 'resupply' || nextPoint.type === 'camp');
 
-    // Periodic status check (every 10 miles)
-    if (Math.floor(this.distance) % 10 === 0) {
-      this.checkStatus();
-    }
-    
     return true;
   }
 
@@ -319,9 +478,10 @@ export class GameState {
       return false;
     }
     
-    const success = Math.random() < option.success;
-    
-    // Track changes for result message
+    const equipBonus = this.getEventEquipmentBonus(this.currentEvent.id);
+    const adjustedSuccess = Math.min(1.0, option.success + equipBonus.successBoost);
+    const success = Math.random() < adjustedSuccess;
+
     const beforeEnergy = this.energy;
     const beforeHealth = this.health;
     const beforeMental = this.mental;
@@ -333,16 +493,25 @@ export class GameState {
     let resultText = '';
 
     if (success) {
-      this.applyEffects(option.effect);
+      const modifiedEffect = { ...option.effect };
+      if (equipBonus.damageReduction > 0) {
+        if (modifiedEffect.energy && modifiedEffect.energy < 0) {
+          modifiedEffect.energy *= (1 - equipBonus.damageReduction);
+        }
+        if (modifiedEffect.health && modifiedEffect.health < 0) {
+          modifiedEffect.health *= (1 - equipBonus.damageReduction);
+        }
+      }
+      this.applyEffects(modifiedEffect);
       resultTitle = 'Success!';
       resultText = this.generateSuccessMessage(option, eventName, beforeEnergy, beforeHealth, beforeMental, beforeFood, beforeWater, beforeMoney);
       this.addLog(`Success: ${option.text}`);
     } else {
-      // Failure has worse effects
+      const damageMultiplier = 1.5 * (1 - equipBonus.damageReduction);
       const failureEffect = {
         ...option.effect,
-        energy: (option.effect.energy || 0) * 1.5,
-        health: (option.effect.health || 0) * 1.5
+        energy: (option.effect.energy || 0) * damageMultiplier,
+        health: (option.effect.health || 0) * damageMultiplier
       };
       this.applyEffects(failureEffect);
       resultTitle = 'Failed...';
@@ -350,17 +519,18 @@ export class GameState {
       this.addLog(`Failed: ${option.text} - Things got worse.`);
     }
 
-    // Update LNT score if option has lntChange
+    if (equipBonus.helpers.length > 0) {
+      resultText += '\n\n🎒 Gear bonus: ' + equipBonus.helpers.join(' | ');
+    }
+
     if (option.lntChange !== undefined) {
       this.updateLNTScore(option.lntChange, option.text);
     }
 
-    // Handle weight changes from events
     if (option.effect.weight) {
       this.currentWeight = Math.max(0, this.currentWeight + option.effect.weight);
     }
 
-    // Set result message to display
     this.resultMessage = {
       title: resultTitle,
       text: resultText,
@@ -447,38 +617,48 @@ export class GameState {
 
   // Check player status and death conditions
   checkStatus() {
-    // Death conditions
     if (this.health <= 0) {
-      this.isDead = true;
-      this.addLog("You have died. Your body temperature dropped too low.");
+      if (!this.attemptEmergencyRescue('Critical health failure')) {
+        this.isDead = true;
+        this.addLog("You have died. Your body gave out.");
+      }
       return;
     }
 
     if (this.energy <= 0) {
-      this.isDead = true;
-      this.addLog("You collapsed from exhaustion.");
-      return;
+      this.health -= 10;
+      this.mental = Math.max(0, this.mental - 10);
+      this.addLog("Extreme exhaustion. Your body is shutting down.");
+      if (this.health <= 0) {
+        if (!this.attemptEmergencyRescue('Total exhaustion')) {
+          this.isDead = true;
+          this.addLog("You collapsed and never got up.");
+        }
+        return;
+      }
     }
 
     if (this.water <= 0) {
       this.health -= 5;
       this.addLog("Severe dehydration. Health declining.");
       if (this.health <= 0) {
-        this.isDead = true;
-        this.addLog("You died from dehydration.");
+        if (!this.attemptEmergencyRescue('Severe dehydration')) {
+          this.isDead = true;
+          this.addLog("You died from dehydration.");
+        }
         return;
       }
     }
 
-    // Food/Calorie system: if food is too low, body starts consuming muscle (health)
     if (this.food <= 0) {
-      // Body enters starvation mode - health declines as body consumes itself
       this.health -= 3;
       this.energy = Math.max(0, this.energy - 5);
       this.addLog("Starvation. Your body is consuming itself for energy.");
       if (this.health <= 0) {
-        this.isDead = true;
-        this.addLog("You died from starvation.");
+        if (!this.attemptEmergencyRescue('Starvation')) {
+          this.isDead = true;
+          this.addLog("You died from starvation.");
+        }
         return;
       }
     } else if (this.food < 5) {
@@ -541,14 +721,18 @@ export class GameState {
     this.money -= totalCost;
     this.currentWeight += totalWeight;
 
-    // Add equipment to inventory
     items.forEach(({ item, quantity }) => {
       for (let i = 0; i < quantity; i++) {
-        this.equipment.push({ ...item });
+        if (item.category === 'supplies') {
+          if (item.effect.food) this.food += item.effect.food;
+          if (item.effect.water) this.water += item.effect.water;
+          if (item.effect.health) this.health = Math.min(100, this.health + item.effect.health);
+        } else {
+          this.equipment.push({ ...item });
+        }
       }
     });
 
-    // Update max weight if backpack purchased
     const backpack = this.equipment.find(eq => eq.effect?.maxWeight);
     if (backpack) {
       this.maxWeight = backpack.effect.maxWeight;

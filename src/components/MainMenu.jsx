@@ -1,9 +1,6 @@
-import { useState } from 'react';
 import './MainMenu.css';
 
-function MainMenu({ onStart, onAbout }) {
-  const [musicEnabled, setMusicEnabled] = useState(false);
-
+function MainMenu({ onStart, onAbout, onProfile, onExam, examPassed }) {
   return (
     <div className="main-menu">
       <div className="main-menu-content">
@@ -19,20 +16,20 @@ function MainMenu({ onStart, onAbout }) {
             <span className="btn-icon">▶</span>
             Start Challenge
           </button>
-          <button className="btn-menu" onClick={() => {}}>
+          <button className="btn-menu" onClick={onProfile}>
             <span className="btn-icon">👤</span>
             My Profile
           </button>
-          <button className="btn-menu" onClick={() => setMusicEnabled(!musicEnabled)}>
-            <span className="btn-icon">{musicEnabled ? '🔊' : '🔇'}</span>
-            Background Music: {musicEnabled ? 'On' : 'Off'}
+          <button className="btn-menu" onClick={onExam}>
+            <span className="btn-icon">📝</span>
+            Theory Exam {examPassed && <span className="exam-badge">Passed</span>}
           </button>
         </div>
 
         <div className="main-footer">
           <div className="footer-links">
             <a href="#" onClick={(e) => { e.preventDefault(); onAbout(); }}>FAQ</a>
-            <a href="#">Theory Exam</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); onExam(); }}>Theory Exam</a>
             <a href="#" onClick={(e) => { e.preventDefault(); onAbout(); }}>About Game</a>
           </div>
           <div className="footer-legal">
