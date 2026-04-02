@@ -1,13 +1,25 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { GameState } from './game/gameState.js';
 import { getTotalMiles, getRoutePoint } from './data/route.js';
 import { examQuestions } from './data/examQuestions.js';
 import MainMenu from './components/MainMenu.jsx';
+import StoryIntro from './components/StoryIntro.jsx';
 import Shop from './components/Shop.jsx';
 import GameView from './components/GameView.jsx';
 import './App.css';
 
 const TOTAL_MILES = getTotalMiles();
+
+// Royalty-free ambient nature/trail music
+const MUSIC_URL = 'https://cdn.pixabay.com/audio/2022/01/18/audio_d0a13f69d2.mp3';
+
+function loadMusicPref() {
+  try { return localStorage.getItem('cyberhiking_music') !== 'off'; } catch { return true; }
+}
+
+function saveMusicPref(on) {
+  try { localStorage.setItem('cyberhiking_music', on ? 'on' : 'off'); } catch {}
+}
 
 function getLntGrade(score) {
   if (score >= 160) return { grade: 'S', label: 'Trail Guardian', color: '#10b981', desc: 'You are a true steward of the wilderness. The trail is better because of you.' };
@@ -31,8 +43,32 @@ function persistProfile(p) {
   try { localStorage.setItem('cyberhiking_profile', JSON.stringify(p)); } catch {}
 }
 
+const SAVE_KEY = 'cyberhiking_savegame';
+
+function saveGame(gs) {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(gs)); } catch {}
+}
+
+function loadSavedGame() {
+  try {
+    const s = localStorage.getItem(SAVE_KEY);
+    if (!s) return null;
+    const data = JSON.parse(s);
+    return Object.assign(new GameState(), data);
+  } catch { return null; }
+}
+
+function clearSavedGame() {
+  try { localStorage.removeItem(SAVE_KEY); } catch {}
+}
+
+function hasSavedGame() {
+  try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; }
+}
+
 const GAME_STATES = {
   MENU: 'menu',
+  STORY_INTRO: 'story_intro',
   SHOP: 'shop',
   GAME: 'game',
   GAME_OVER: 'game_over',
@@ -41,29 +77,7 @@ const GAME_STATES = {
 
 // Helper function to clone game state
 function cloneGameState(prev) {
-  const newState = new GameState();
-  newState.currentLocation = prev.currentLocation;
-  newState.health = prev.health;
-  newState.energy = prev.energy;
-  newState.mental = prev.mental;
-  newState.food = prev.food;
-  newState.water = prev.water;
-  newState.time = prev.time;
-  newState.distance = prev.distance;
-  newState.isDead = prev.isDead;
-  newState.isComplete = prev.isComplete;
-  newState.currentEvent = prev.currentEvent ? { ...prev.currentEvent } : null;
-  newState.resultMessage = prev.resultMessage ? { ...prev.resultMessage } : null;
-  newState.log = [...prev.log];
-  newState.equipment = [...prev.equipment];
-  newState.maxWeight = prev.maxWeight;
-  newState.currentWeight = prev.currentWeight;
-  newState.money = prev.money;
-  newState.lntScore = prev.lntScore;
-  newState.dailyCalorieNeed = prev.dailyCalorieNeed;
-  newState.bmr = prev.bmr;
-  newState.weather = prev.weather ? { ...prev.weather } : null;
-  newState.temperature = prev.temperature;
+  const newState = Object.assign(new GameState(), JSON.parse(JSON.stringify(prev)));
   return newState;
 }
 
@@ -78,6 +92,34 @@ function App() {
   const [examAnswers, setExamAnswers] = useState([]);
   const [examDone, setExamDone] = useState(false);
   const [examSelected, setExamSelected] = useState(null);
+  const [musicOn, setMusicOn] = useState(loadMusicPref);
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio(MUSIC_URL);
+      audioRef.current.loop = true;
+      audioRef.current.volume = 0.3;
+    }
+  }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (musicOn) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, [musicOn]);
+
+  const toggleMusic = useCallback(() => {
+    setMusicOn(prev => {
+      const next = !prev;
+      saveMusicPref(next);
+      return next;
+    });
+  }, []);
 
   const saveGameResult = useCallback((gs, result) => {
     const p = loadProfile();
@@ -103,6 +145,10 @@ function App() {
       gs.lntScore = 120;
     }
     setGameState(gs);
+    setCurrentView(GAME_STATES.STORY_INTRO);
+  };
+
+  const handleStoryComplete = () => {
     setCurrentView(GAME_STATES.SHOP);
   };
 
@@ -111,6 +157,7 @@ function App() {
       const newState = cloneGameState(prev);
       const result = newState.purchaseEquipment(items);
       if (result.success) {
+        saveGame(newState);
         setTimeout(() => setCurrentView(GAME_STATES.GAME), 0);
       } else {
         alert(result.message);
@@ -119,16 +166,28 @@ function App() {
     });
   }, []);
 
+  const handleResume = () => {
+    const saved = loadSavedGame();
+    if (saved) {
+      setGameState(saved);
+      setCurrentView(GAME_STATES.GAME);
+    }
+  };
+
   const handleMoveForward = useCallback(() => {
     setGameState(prev => {
       const newState = cloneGameState(prev);
       newState.moveForward();
       if (newState.isDead) {
+        clearSavedGame();
         saveGameResult(newState, 'death');
         setTimeout(() => setCurrentView(GAME_STATES.GAME_OVER), 0);
       } else if (newState.isComplete) {
+        clearSavedGame();
         saveGameResult(newState, 'complete');
         setTimeout(() => setCurrentView(GAME_STATES.GAME_COMPLETE), 0);
+      } else {
+        saveGame(newState);
       }
       return newState;
     });
@@ -139,8 +198,11 @@ function App() {
       const newState = cloneGameState(prev);
       newState.rest();
       if (newState.isDead) {
+        clearSavedGame();
         saveGameResult(newState, 'death');
         setTimeout(() => setCurrentView(GAME_STATES.GAME_OVER), 0);
+      } else {
+        saveGame(newState);
       }
       return newState;
     });
@@ -154,11 +216,15 @@ function App() {
         newState.currentEvent = null;
       }
       if (newState.isDead) {
+        clearSavedGame();
         saveGameResult(newState, 'death');
         setTimeout(() => setCurrentView(GAME_STATES.GAME_OVER), 0);
       } else if (newState.isComplete) {
+        clearSavedGame();
         saveGameResult(newState, 'complete');
         setTimeout(() => setCurrentView(GAME_STATES.GAME_COMPLETE), 0);
+      } else {
+        saveGame(newState);
       }
       return newState;
     });
@@ -168,6 +234,7 @@ function App() {
     setGameState(prev => {
       const newState = cloneGameState(prev);
       newState.resultMessage = null;
+      saveGame(newState);
       return newState;
     });
   }, []);
@@ -180,7 +247,20 @@ function App() {
     });
   }, []);
 
+  const handleLeaveTemporarily = useCallback(() => {
+    saveGame(gameState);
+    setCurrentView(GAME_STATES.MENU);
+  }, [gameState]);
+
+  const handleAbandonChallenge = useCallback(() => {
+    clearSavedGame();
+    saveGameResult(gameState, 'death');
+    setGameState(new GameState());
+    setCurrentView(GAME_STATES.MENU);
+  }, [gameState, saveGameResult]);
+
   const handleReset = () => {
+    clearSavedGame();
     setGameState(new GameState());
     setCurrentView(GAME_STATES.MENU);
   };
@@ -188,12 +268,16 @@ function App() {
   return (
     <div className="app">
       {currentView === GAME_STATES.MENU && (
-        <MainMenu 
+        <MainMenu
           onStart={handleStart}
+          onResume={handleResume}
+          hasSavedGame={hasSavedGame()}
           onAbout={() => setShowAbout(!showAbout)}
           onProfile={() => { setShowProfile(true); setProfile(loadProfile()); }}
           onExam={() => { setShowExam(true); setExamQ(0); setExamAnswers([]); setExamDone(false); setExamSelected(null); }}
           examPassed={profile.examPassed}
+          musicOn={musicOn}
+          onToggleMusic={toggleMusic}
         />
       )}
 
@@ -369,6 +453,10 @@ function App() {
         </div>
       )}
 
+      {currentView === GAME_STATES.STORY_INTRO && (
+        <StoryIntro onContinue={handleStoryComplete} />
+      )}
+
       {currentView === GAME_STATES.SHOP && (
         <div className="shop-view">
           <Shop
@@ -388,6 +476,10 @@ function App() {
           onEventChoice={handleEventChoice}
           onDismissResult={handleDismissResult}
           onResupply={handleResupply}
+          onLeaveTemporarily={handleLeaveTemporarily}
+          onAbandonChallenge={handleAbandonChallenge}
+          musicOn={musicOn}
+          onToggleMusic={toggleMusic}
         />
       )}
 

@@ -28,6 +28,7 @@ export class GameState {
     this.lntScore = 100; // Leave No Trace score (0-200, 100 is neutral)
     this.dailyCalorieNeed = 4000; // Base daily calorie requirement (increases with distance)
     this.bmr = 1800; // Base Metabolic Rate (calories per day)
+    this.debuffs = []; // Active debuffs array
     this.updateWeather();
   }
 
@@ -283,6 +284,7 @@ export class GameState {
 
     this.canResupply = (nextPoint.type === 'resupply' || nextPoint.type === 'camp');
 
+    this.updateDebuffs();
     return true;
   }
 
@@ -415,48 +417,58 @@ export class GameState {
 
     this.addLog(`Rested for ${restTime} hours. Energy restored to ${Math.round(this.energy)}%.`);
     this.checkStatus();
+    this.updateDebuffs();
     return true;
   }
 
-  // Trigger random event (weighted by LNT score and location)
+  // Trigger random event using weighted selection
   triggerEvent() {
-    let availableEvents = [...events];
-    
-    // High LNT score increases chance of positive events
-    if (this.lntScore > 120) {
-      // More likely to get trail magic, trail family
-      const positiveEvents = events.filter(e => e.id === 'resupply' || e.id === 'trail-family');
-      availableEvents = [...availableEvents, ...positiveEvents];
-    }
-    
-    // Low LNT score increases chance of negative events
-    if (this.lntScore < 80) {
-      // More likely to get ranger check, wildlife issues
-      const negativeEvents = events.filter(e => e.id === 'ranger' || e.id === 'wildlife-feed');
-      availableEvents = [...availableEvents, ...negativeEvents];
-    }
-    
-    // Location-based events
     const location = getRoutePoint(this.currentLocation);
-    if (location.elevation > 10000) {
-      // High altitude events
-      const snowEvent = events.find(e => e.id === 'snow');
-      if (snowEvent) availableEvents.push(snowEvent);
+    const weights = events.map(event => {
+      let weight = 1.0;
+
+      // LNT score modifies positive/negative event weights
+      if (this.lntScore > 120) {
+        if (event.type === 'positive') weight += 0.8;
+        if (event.id === 'ranger') weight += 0.3;
+      }
+      if (this.lntScore < 80) {
+        if (event.id === 'ranger' || event.id === 'wildlife-feed') weight += 1.0;
+        if (event.type === 'positive') weight *= 0.5;
+      }
+
+      // Location-based weights
+      if (location.elevation > 10000) {
+        if (event.id === 'snow' || event.id === 'altitude-sickness') weight += 1.5;
+      }
+      if (location.elevation < 3000 && this.temperature > 85) {
+        if (event.id === 'heat' || event.id === 'dehydration') weight += 1.5;
+      }
+      if (location.elevation > 6000) {
+        if (event.id === 'steep-descent' || event.id === 'beautiful-vista') weight += 0.5;
+      }
+
+      // River crossings more likely in Sierra
+      if (this.distance > 700 && this.distance < 1100) {
+        if (event.id === 'river-crossing') weight += 1.0;
+      }
+
+      return weight;
+    });
+
+    // Weighted random selection
+    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+    let roll = Math.random() * totalWeight;
+    let selected = events[0];
+    for (let i = 0; i < events.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) {
+        selected = events[i];
+        break;
+      }
     }
-    if (location.elevation < 3000 && this.temperature > 85) {
-      // Desert heat events
-      const heatEvent = events.find(e => e.id === 'heat');
-      if (heatEvent) availableEvents.push(heatEvent);
-    }
-    
-    // Filter out undefined events
-    availableEvents = availableEvents.filter(e => e !== undefined);
-    
-    if (availableEvents.length === 0) {
-      availableEvents = events; // Fallback to all events
-    }
-    
-    this.currentEvent = availableEvents[Math.floor(Math.random() * availableEvents.length)];
+
+    this.currentEvent = selected;
     this.addLog(`Event: ${this.currentEvent.name}`);
   }
 
@@ -615,6 +627,35 @@ export class GameState {
     if (effects.money) this.money = Math.max(0, this.money + effects.money);
   }
 
+  // Evaluate and update active debuffs based on current stats
+  updateDebuffs() {
+    const DEBUFF_DEFS = [
+      { id: 'dehydration', name: 'Dehydration', stat: 'water', color: '#06b6d4', condition: () => this.water <= 2 },
+      { id: 'severe-dehydration', name: 'Severe Dehydration', stat: 'water', color: '#ef4444', condition: () => this.water <= 0.5 },
+      { id: 'hypothermia', name: 'Hypothermia', stat: 'temperature', color: '#3b82f6', condition: () => this.temperature < 25 },
+      { id: 'heat-exhaustion', name: 'Heat Exhaustion', stat: 'temperature', color: '#f97316', condition: () => this.temperature > 95 },
+      { id: 'starvation', name: 'Starvation', stat: 'food', color: '#f97316', condition: () => this.food <= 1 },
+      { id: 'hunger', name: 'Hunger', stat: 'food', color: '#fbbf24', condition: () => this.food > 1 && this.food <= 5 },
+      { id: 'exhaustion', name: 'Exhaustion', stat: 'energy', color: '#f59e0b', condition: () => this.energy <= 15 },
+      { id: 'muscle-cramp', name: 'Muscle Cramp', stat: 'energy', color: '#d97706', condition: () => this.energy <= 30 && this.energy > 15 },
+      { id: 'low-morale', name: 'Low Morale', stat: 'mental', color: '#a855f7', condition: () => this.mental <= 30 },
+      { id: 'injured', name: 'Injured', stat: 'health', color: '#ef4444', condition: () => this.health <= 40 && this.health > 15 },
+      { id: 'critical', name: 'Critical Condition', stat: 'health', color: '#dc2626', condition: () => this.health <= 15 },
+      { id: 'altitude-sick', name: 'Altitude Sickness', stat: 'health', color: '#8b5cf6', condition: () => {
+        const loc = getRoutePoint(this.currentLocation);
+        return loc && loc.elevation > 10000 && this.health < 70;
+      }},
+      { id: 'overloaded', name: 'Overloaded', stat: 'energy', color: '#78716c', condition: () => this.currentWeight > this.maxWeight * 0.9 },
+    ];
+
+    this.debuffs = DEBUFF_DEFS.filter(d => d.condition()).map(d => ({
+      id: d.id,
+      name: d.name,
+      stat: d.stat,
+      color: d.color,
+    }));
+  }
+
   // Check player status and death conditions
   checkStatus() {
     if (this.health <= 0) {
@@ -697,6 +738,9 @@ export class GameState {
     if (this.health < 100 && this.energy > 50 && this.food > 0 && this.water > 0) {
       this.health = Math.min(100, this.health + 0.5);
     }
+
+    // Update debuffs based on current state
+    this.updateDebuffs();
   }
 
   // Complete the trail

@@ -1,0 +1,165 @@
+/* ══════════════════════════════════════════
+   Story Intro — Narrative Prologue
+   ══════════════════════════════════════════ */
+
+.story-intro {
+  min-height: 100vh;
+  min-height: 100dvh;
+  position: relative;
+  color: white;
+  overflow: hidden;
+}
+
+.story-bg-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background:
+    linear-gradient(rgba(0, 0, 0, 0.65), rgba(0, 0, 0, 0.75)),
+    url('https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=2070&q=80') center/cover;
+  z-index: 0;
+  animation: storyBgShift 30s ease-in-out infinite alternate;
+}
+
+@keyframes storyBgShift {
+  0%   { transform: scale(1); }
+  100% { transform: scale(1.08); }
+}
+
+.story-content {
+  position: relative;
+  z-index: 1;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 80px 28px 120px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.story-paragraphs {
+  flex: 1;
+}
+
+.story-paragraph {
+  font-size: 1.05em;
+  line-height: 1.9;
+  margin-bottom: 28px;
+  color: rgba(255, 255, 255, 0.85);
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.story-paragraph.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Last paragraph — emphasis */
+.story-paragraph:last-child {
+  font-size: 1.2em;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  margin-top: 12px;
+}
+
+/* ── Continue Button ── */
+.story-actions {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease 0.5s, transform 0.6s ease 0.5s;
+  text-align: center;
+  padding: 20px 0 40px;
+}
+
+.story-actions.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.story-continue-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: white;
+  padding: 16px 36px;
+  font-size: 1.1em;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.story-continue-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+.story-arrow {
+  font-size: 1.2em;
+  transition: transform 0.2s ease;
+}
+
+.story-continue-btn:hover .story-arrow {
+  transform: translateX(4px);
+}
+
+/* ── Skip Button ── */
+.story-skip-btn {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.5);
+  padding: 8px 20px;
+  font-size: 0.85em;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.story-skip-btn:hover {
+  color: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .story-content {
+    padding: 50px 20px 100px;
+  }
+
+  .story-paragraph {
+    font-size: 0.95em;
+    line-height: 1.8;
+    margin-bottom: 22px;
+  }
+
+  .story-paragraph:last-child {
+    font-size: 1.1em;
+  }
+
+  .story-continue-btn {
+    padding: 14px 28px;
+    font-size: 1em;
+  }
+
+  .story-skip-btn {
+    bottom: 20px;
+    right: 20px;
+  }
+}
